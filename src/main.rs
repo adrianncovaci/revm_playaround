@@ -24,7 +24,7 @@ async fn main() -> Result<(), anyhow::Error> {
         Some(block_id)
     );
 
-    insert_dummy_account(&mut fork_factory)?;
+    insert_dummy_account(&mut fork_factory, U256::MAX - 1, U256::MAX - 1)?;
 
     let fork_db = fork_factory.new_sandbox_fork();
 
@@ -34,12 +34,13 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let dummy_address = Address::from_str("0x0093562c7e4BcC8e4D256A27e08C9ae6Ac4F895c")?;
     let receiver = Address::from_str("0x0093562c7E4BcC8e4D256A27E08C9ae6aC4f875C")?;
-    let balance_of_data = erc20_balanceof().encode("balanceOf", dummy_address)?;
+    let balance_of_data_dummy = erc20_balanceof().encode("balanceOf", dummy_address)?;
+    let balance_of_data_receiver = erc20_balanceof().encode("balanceOf", receiver)?;
 
     let result = sim_call(
         Address::zero(),
         *XERO,
-        balance_of_data.clone(),
+        balance_of_data_dummy.clone(),
         U256::zero(),
         false,
         &mut evm
@@ -51,13 +52,42 @@ async fn main() -> Result<(), anyhow::Error> {
     assert!(balance > parse_ether(1).unwrap(), "Balance is not bigger than 1 WETH: {}", balance);
     println!("Account Initial xai Balance: {}", to_readable(balance, *XERO));
     
-    let value = U256::MAX;
+    let result = sim_call(
+        Address::zero(),
+        *FORGE,
+        balance_of_data_receiver.clone(),
+        U256::zero(),
+        false,
+        &mut evm
+    )?;
 
-    let transfer = xai_transfer().encode("transfer", (receiver, value))?;
+    assert!(!result.is_reverted, "BalanceOf call reverted, Reason: {:?}", bytes_to_string(result.output));
+
+    let balance: U256 = erc20_balanceof().decode_output("balanceOf", &result.output)?;
+    println!("Account Initial forge Balance: {}", to_readable(balance, *FORGE));
+    
+    // Transfer XAI to the dummy account - Will revert due to max tx %
+    //let value = U256::MAX;
+
+    //let transfer = xai_transfer().encode("transfer", (receiver, value))?;
+    // 
+    //let _result = sim_call(
+    //    dummy_address,
+    //    *XERO,
+    //    transfer,
+    //    U256::zero(),
+    //    false,
+    //    &mut evm
+    //)?;
+    
+    // Transfer XERO to the dummy account - Will revert due to max wallet %
+    let value = U256::from(1);
+
+    let transfer = erc20_transfer().encode("transfer", (receiver, value))?;
     
     let _result = sim_call(
         dummy_address,
-        *XERO,
+        *FORGE,
         transfer,
         U256::zero(),
         false,

@@ -21,6 +21,7 @@ lazy_static!{
     pub static ref XERO: Address = Address::from_str("0xC5842df170b8C8D09EB851A8D5DB3dfa00669E3F").unwrap();
     pub static ref USDT: Address = Address::from_str("0xdAC17F958D2ee523a2206206994597C13D831ec7").unwrap();
     pub static ref USDC: Address = Address::from_str("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48").unwrap();
+    pub static ref FORGE: Address = Address::from_str("0xd8Cb7f2c90033D4873e28003f15B748eBfA415fb").unwrap(); 
 }
 
 #[derive(Debug, Clone)]
@@ -135,11 +136,12 @@ pub fn sim_call<'a>(
 
 
 /// Inserts a dummy EOA account to the fork factory
-pub fn insert_dummy_account(fork_factory: &mut ForkFactory) -> Result<(), anyhow::Error> {
+pub fn insert_dummy_account(fork_factory: &mut ForkFactory, xai_amount: U256, forge_amount: U256) -> Result<(), anyhow::Error> {
 
     // you can use whatever address you want for the dummy account as long as its a valid ethereum address and ideally not in use (Doesn't have a state)
     // you could use an online tool like: https://vanity-eth.tk/ to generate a random address
     let dummy_address = Address::from_str("0x0093562c7e4BcC8e4D256A27e08C9ae6Ac4F895c")?;
+    let receiver = Address::from_str("0x0093562c7E4BcC8e4D256A27E08C9ae6aC4f875C")?;
 
     // create a new account info
     // We also set 1 ETH in balance
@@ -151,18 +153,22 @@ pub fn insert_dummy_account(fork_factory: &mut ForkFactory) -> Result<(), anyhow
     };
 
     // insert the account info into the fork factory
-    fork_factory.insert_account_info(dummy_address.0.into(), account_info);
-
-    // Now we fund the dummy account with 1 WETH
-    let xai_amount = U256::MAX;
-    //let weth_address = Address::from_str("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")?;
+    fork_factory.insert_account_info(dummy_address.0.into(), account_info.clone());
+    fork_factory.insert_account_info(receiver.0.into(), account_info);
+    
     let xai_address = Address::from_str("0xC5842df170b8C8D09EB851A8D5DB3dfa00669E3F")?;
+    let forge_address = Address::from_str("0xd8Cb7f2c90033D4873e28003f15B748eBfA415fb")?;
     
     // To fund any ERC20 token to an account we need the balance storage slot of the token
     // For WETH its 3
     // An amazing online tool to see the storage mapping of any contract https://evm.storage/
     let xai_slot: U256 = keccak256(abi::encode(&[
         abi::Token::Address(dummy_address.0.into()),
+        abi::Token::Uint(U256::from(1)),
+    ])).into();
+    
+    let forge_slot: U256 = keccak256(abi::encode(&[
+        abi::Token::Address(receiver.0.into()),
         abi::Token::Uint(U256::from(1)),
     ])).into();
 
@@ -174,9 +180,18 @@ pub fn insert_dummy_account(fork_factory: &mut ForkFactory) -> Result<(), anyhow
     ) {
         return Err(anyhow::anyhow!("Failed to insert account storage: {}", e));
     }
+    
+    if let Err(e) = fork_factory.insert_account_storage(
+        forge_address.0.into(),
+        to_revm_u256(forge_slot),
+        to_revm_u256(forge_amount),
+    ) {
+        return Err(anyhow::anyhow!("Failed to insert account storage: {}", e));
+    }
 
     Ok(())
 }
+
 pub fn to_readable(amount: U256, token: Address) -> String {
     let decimals = match_decimals(token);
     let divisor_str = format!("1{:0>width$}", "", width = decimals as usize);
@@ -207,7 +222,7 @@ pub fn erc20_balanceof() -> BaseContract {
     ).unwrap())
 }
 
-pub fn xai_transfer() -> BaseContract {
+pub fn erc20_transfer() -> BaseContract {
     BaseContract::from(parse_abi(
         &["function transfer(address to, uint256 amount) external virtual override returns (bool)"]
     ).unwrap())
